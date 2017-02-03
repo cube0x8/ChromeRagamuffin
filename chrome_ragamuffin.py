@@ -201,7 +201,7 @@ class _document(obj.CType):
 
     @property
     def url_string(self):
-        url_string = get_chrome_string(self, self.m_string)
+        url_string = get_chrome_string(self, self.m_url)
         return url_string
 
     @property
@@ -256,6 +256,7 @@ class chrome_ragamuffin(linux_pslist.linux_pslist):
             m_preloadResults_offset = m_parsed_ptr - 88
             resource = obj.Object("resource", vm=proc_as, offset=m_preloadResults_offset)
             if resource.is_valid():
+                print resource.plain_js
                 yield resource.plain_js
 
     def html_document_entries(self, proc_as, task):
