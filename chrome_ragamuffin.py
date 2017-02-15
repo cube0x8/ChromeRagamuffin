@@ -21,94 +21,55 @@
 """
 
 import inspect
+import libchrome
 import struct
 import volatility.obj as obj
 import volatility.debug as debug
 import volatility.addrspace as addrspace
 import volatility.plugins.linux.common as linux_common
 import volatility.plugins.linux.pslist as linux_pslist
+import volatility.scan as scan
+import volatility.utils as utils
 from volatility.renderers import TreeGrid
-import pprint
-
-chrome_vtypes = {
-    'chrome_space': [56, {
-      'heap': [24, ['pointer', ['void']]],
-      'allocation_space': [32, ['int']],
-      'executability': [36, ['int']]
-    }],
-    'chrome_isolate': [27712, {
-      # We have the Heap at the offset 32.
-      'heap_isolate_ptr': [48, ['pointer', ['chrome_isolate']]],
-      'newspace': [3072, ['chrome_space']],
-      'oldspace': [4152, ['pointer', ['chrome_space']]],
-      'codespace': [4160, ['pointer', ['chrome_space']]],
-      'mapspace': [4168, ['pointer', ['chrome_space']]],
-      'lospace': [4176, ['pointer', ['chrome_space']]],
-    }],
-    'stringimpl': [12, {
-     'm_refCount': [0, ['unsigned int']],
-     'm_length': [4, ['unsigned int']],
-     'm_hash': [8, ['BitField', dict(start_bit = 0, end_bit = 23, native_type="unsigned int")]],
-     'm_isAtomic': [11, ['BitField', dict(start_bit=0, end_bit=0, native_type="unsigned int")]],
-     'm_is8bit': [11, ['BitField', dict(start_bit=1, end_bit=1, native_type="unsigned int")]],
-     'm_isStatic': [11, ['BitField', dict(start_bit=2, end_bit=2, native_type="unsigned int")]],
-    }],
-    'local_dom_window': [384, {
-      'm_document':[192, ['pointer', ['chrome_document']]],
-    }],
-    'dom_element': [72, {
-     'm_nodeFlags': [16, ['unsigned int']],
-     'm_parentOrShadowHostNode': [24, ['pointer', ['dom_element']]],
-     'm_treescope': [32, ["pointer", ["treescope"]]],
-     'm_previous': [40, ['pointer',['dom_element']]],
-     'm_next': [48, ['pointer', ['dom_element']]],
-     'm_data': [64, ['pointer', ['stringimpl']]]
-    }],
-    'htmlscriptelement': [112, {
-     'm_nodeFlags': [16, ['unsigned int']],
-     'm_treescope': [32, ["pointer", ["treescope"]]],
-     'm_previous': [40, ['pointer',['dom_element']]],
-     'm_next': [48, ['pointer', ['dom_element']]],
-     'm_firstChild': [72, ['pointer', ['dom_element']]]
-    }],
-   'chrome_document': [2800, {
-     'm_domWindow': [472, ['pointer', ['local_dom_window']]],
-     'm_url': [600, ['pointer', ['stringimpl']]],
-     'm_documentElement': [1208, ['pointer', ['dom_element']]],
-     'm_title': [1392, ['pointer', ['stringimpl']]],
-     'm_scriptRunner': [1544, ['pointer', ['ScriptRunner']]],
-    }],
-    'resource': [1856, {
-     'remoteIPAddress': [1520, ['pointer', ['stringimpl']]],
-     'm_data': [1800, ["pointer", ["void"]]],
-     'm_type': [1776, ['BitField', dict(start_bit=2, end_bit=5, native_type="unsigned int")]],
-     'm_status': [1776, ['BitField', dict(start_bit=6, end_bit=8, native_type="unsigned int")]],
-     'script_buffer': [1840, ['pointer', ['js_buffer']]]
-    }],
-    'js_buffer':[32, {
-     'm_script': [24, ['pointer', ['stringimpl']]],
-    }],
-    'treescope': [88, {
-     'm_document': [16, ['pointer', ["chrome_document"]]],
-     'm_parentTreeScope': [24, ['pointer', ["treescope"]]]
-    }],
-}
+import time
 
 document_list = []
+urlparsed = []
 
-def get_chrome_string(self, strimpl_offset):
-        strimpl_object = obj.Object("stringimpl", vm=self.obj_vm, offset=strimpl_offset) #instanzia l'oggetto puntato da m_string (l'url vero e proprio)
-        string_length = strimpl_object.m_length 
-        #l url e' shiftato di 12 byte rispetto alla zona referenziata dal puntatore alla StringImpl. I primi 12 byte sono occupati da vari metadati, dopo parte la stringa.
-        #Guardare la definizione del VType stringimpl per ulteriori dettagli
-        if string_length > 0:
-            raw_string = self.obj_vm.read(strimpl_offset + 12, string_length)            
-            return raw_string
-        return None
-    
+class UrlParsedScanner():
+    task = None
+    proc_as = None
+
+    def __init__(self, address_space, task):
+        self.task = task
+        self.proc_as = address_space
+
+    def scan(self):
+        for(idx, m_parsed_ptr) in enumerate(self.task.search_process_memory(libchrome.url_parsed_signatures, heap_only = False)):
+        #maybe a url::Parsed struct found. save it
+            urlparsed.append(m_parsed_ptr)
+        
+class DocumentScanner():
+    proc_as = None
+
+    def __init__(self, address_space):
+        self.proc_as = address_space
+
+    def scan(self):
+        for(m_parsed_ptr) in urlparsed:
+            #document start offset
+            document_start_offset = m_parsed_ptr - 528
+            document = obj.Object("chrome_document", vm=self.proc_as, offset=document_start_offset)
+            if self.is_valid(document):
+                document_list.append(document_start_offset)
+                yield document_start_offset, document.url_string, document.document_title
+
+    def is_valid(self, document):
+        if document.m_domWindow.m_document.v() == document.obj_offset: #mutual-reference Document <-> LocalDomWindow
+            return True
+        return False
 
 class _space(obj.CType):
-  
   def is_valid(self):
     # verificare che il puntatore allo heap sia giusto.
     if (self.executability in [0,1] and
@@ -132,7 +93,7 @@ class _domElement(obj.CType):
 
     @property
     def characters(self):
-        return get_chrome_string(self, self.m_data)
+        return libchrome.get_chrome_string(self, self.m_data)
 
     @property
     def firstChild(self):
@@ -191,32 +152,26 @@ class _resource(obj.CType):
     @property
     def plain_js(self):
         script_buffer = obj.Object("js_buffer", vm=self.obj_vm, offset=self.script_buffer)
-        return get_chrome_string(self, script_buffer.m_script)
+        return libchrome.get_chrome_string(self, script_buffer.m_script)
 
 class _document(obj.CType):
-    
     @property
     def documentElement(self):
         return self.m_documentElement
 
     @property
     def url_string(self):
-        url_string = get_chrome_string(self, self.m_url)
+        url_string = libchrome.get_chrome_string(self, self.m_url)
         return url_string
 
     @property
     def document_title(self):
-        title = get_chrome_string(self, self.m_title)
+        title = libchrome.get_chrome_string(self, self.m_title)
         return title
-
-    def is_valid(self, proc_as):
-        if self.m_domWindow.m_document.v() == self.obj_offset: #abbiamo un document?
-            return True
-        return False
 
 class ChromeTypes(obj.ProfileModification):
     def modification(self, profile):
-        profile.vtypes.update(chrome_vtypes)
+        profile.vtypes.update(libchrome.chrome_vtypes)
         profile.object_classes.update({"chrome_space": _space, "chrome_isolate": _isolate, "chrome_document": _document, "resource": _resource, "treescope": _treeScope, "dom_element": _domElement, "htmlscriptelement": _domElement})
 
 class chrome_ragamuffin(linux_pslist.linux_pslist):
@@ -251,27 +206,13 @@ class chrome_ragamuffin(linux_pslist.linux_pslist):
                 #print("element start offset: %s" % (hex(proc_as.vtop(element - 16))))
                 print htmlscriptelement.characters
 
-        #JavaScript shipped by HTTP request.
+        #external JavaScript included with "src".
         for m_parsed_ptr in self.urlparsed:
             m_preloadResults_offset = m_parsed_ptr - 88
             resource = obj.Object("resource", vm=proc_as, offset=m_preloadResults_offset)
             if resource.is_valid():
                 print resource.plain_js
                 yield resource.plain_js
-
-    def html_document_entries(self, proc_as, task):
-        url_parsed_signatures = [struct.pack("<iiiiiii", 0, 4, 0, -1, 0, -1, 7), struct.pack("<iiiiiiiiiii", 0, 4, 0, -1, 0, -1, 0, -1, 0, -1, 7), struct.pack("<iiiiiii", 0, 5, 0, -1, 0, -1, 8), struct.pack("<iiiiiii", 0, -1, 0, -1, 0, -1, 0)]
-        for(idx, m_parsed_ptr) in enumerate(task.search_process_memory(url_parsed_signatures, heap_only = False)):
-        #maybe a url::Parsed struct found. save it
-            self.urlparsed.append(m_parsed_ptr)
-            #document start offset
-            document_start_offset = m_parsed_ptr - 528
-            document = obj.Object("chrome_document", vm=proc_as, offset=document_start_offset)
-            if document.is_valid(proc_as):
-                document_list.append(document_start_offset)
-                
-                yield task, document_start_offset, document.url_string, document.document_title
-
 
     def calculate(self):
         linux_common.set_plugin_members(self)
@@ -292,17 +233,18 @@ class chrome_ragamuffin(linux_pslist.linux_pslist):
             if "pid" in self._config.opts and str(task.pid) != str(self._config.opts["pid"]):
                 continue
 
-            #for (task, ptr) in (self.isolate_spaces_heap_entries(proc_as, task)): #trovo puntatori allo heap, all'isolate e agli spaces
-            for (task, ptr, url, title) in (self.html_document_entries(proc_as, task)): #trovo puntatori ai Document
-                yield task, ptr, url, title
+            UrlParsedScanner(proc_as, task).scan()
 
-            if "dump_resource" in self._config.opts:
-                for js in (self.rummage_javascript(proc_as, task)): #dumpo i js
+            #for (task, ptr) in (self.isolate_spaces_heap_entries(proc_as, task)): #V8Scanner... too much beta for now
+
+            for (document_offset, url, title) in DocumentScanner(proc_as).scan():
+                yield task, document_offset, url, title
+
+            if "dump_resource" in self._config.opts: #very ugly code but it works
+                for js in (self.rummage_javascript(proc_as, task)):
                     continue
 
-
     def unified_output(self, data):
-        print len(data)
         return TreeGrid([("Pid", int),
                          ("Document offset", str),
                          ("URL", str),
@@ -321,6 +263,3 @@ class chrome_ragamuffin(linux_pslist.linux_pslist):
 
         for task, offs, url, title in data:
             self.table_row(outfd, task.pid, hex(offs), str(url), str(title))
-
-    def render_body(self, outfd, data):
-        print "so what" 
