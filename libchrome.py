@@ -9,12 +9,15 @@ chrome_vtypes = {
     }],
     'chrome_isolate': [27712, {
       # We have the Heap at the offset 32.
-      'heap_isolate_ptr': [48, ['pointer', ['chrome_isolate']]],
+      'isolate_': [48, ['pointer', ['chrome_isolate']]],
       'newspace': [3072, ['chrome_space']],
       'oldspace': [4152, ['pointer', ['chrome_space']]],
       'codespace': [4160, ['pointer', ['chrome_space']]],
       'mapspace': [4168, ['pointer', ['chrome_space']]],
       'lospace': [4176, ['pointer', ['chrome_space']]],
+    }],
+    'v8_heap': [6472, {
+     'isolate_': [16, ['pointer', ['chrome_isolate']]],
     }],
     'stringimpl': [12, {
      'm_refCount': [0, ['unsigned int']],
