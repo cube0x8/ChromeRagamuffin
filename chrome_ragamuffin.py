@@ -69,18 +69,25 @@ class DocumentScanner():
             return True
         return False
 
-class _space(obj.CType):
-  def is_valid(self):
-    # verificare che il puntatore allo heap sia giusto.
-    if (self.executability in [0,1] and
-       self.allocation_space < 5 and
-       self.allocation_space >= 0):
-       return True
-    return False
+class V8Scanner():
+    proc_as = None
+    task = None
 
-class _v8_heap(obj.CType):
-    def is_valid(self):
-        isolate = self.isolate_.dereference()
+    def __init__(self, address_space, task):
+        self.proc_as = address_space
+        self.task = task
+
+    def scan(self):
+        for (idx, codespace_ptr) in enumerate(self.task.search_process_memory([struct.pack('<II', 2, 1)], heap_only = False)):
+        #maybe NewSpace
+            space = obj.Object("chrome_space", vm=self.proc_as, offset=codespace_ptr - 32)
+            heap = obj.Object("v8_heap", vm=self.proc_as, offset=space.heap)
+            if self.is_valid(heap):
+                isolate = obj.Object("chrome_isolate", vm=self.proc_as, offset=heap.isolate_)
+                yield isolate.obj_offset
+
+    def is_valid(self, heap):
+        isolate = heap.isolate_.dereference()
         if isolate.obj_offset == isolate.isolate_:
             return True
 
@@ -104,50 +111,6 @@ class _domElement(obj.CType):
     @property
     def firstChild(self):
         return self.m_firstChild
-
-
-class _isolate(obj.CType):
-  def is_valid(self):
-    toreturn = True
-    if not self.check_space(self.newspace, 0, 0):
-      self.debug_fail()
-      toreturn = False
-    if not self.check_space(self.oldspace.dereference(), 1, 0):
-      self.debug_fail()
-      toreturn = False
-    if not self.check_space(self.codespace.dereference(), 2, 1):
-      self.debug_fail()
-      toreturn = False
-    if not self.check_space(self.mapspace.dereference(), 3, 0):
-      self.debug_fail()
-      toreturn = False
-    if not self.check_space(self.lospace.dereference(), 4, 0):
-      self.debug_fail()
-      toreturn = False
-    if self.heap_isolate_ptr.v() != self.obj_offset:
-      self.debug_fail()
-      toreturn = False
-    return toreturn
-
-  def check_space(self, ob, allsp, exe):
-    toreturn = True
-    if not ob.is_valid():
-      self.debug_fail()
-      toreturn = False
-    if ob.executability !=exe or ob.allocation_space != allsp:
-      self.debug_fail()
-      toreturn = False
-    if ob.heap.v() != self.obj_offset +32:
-      self.debug_fail()
-      toreturn = False
-    return toreturn
-    
-  def debug_fail(self):
-      callerframerecord = inspect.stack()[1]    # 0 represents this line
-                                            # 1 represents line at caller
-      frame = callerframerecord[0]
-      info = inspect.getframeinfo(frame)
-      print "%r: %s:%d" % (self.obj_offset, info.function, info.lineno)
 
 class _resource(obj.CType):
     def is_valid(self):
@@ -178,25 +141,16 @@ class _document(obj.CType):
 class ChromeTypes(obj.ProfileModification):
     def modification(self, profile):
         profile.vtypes.update(libchrome.chrome_vtypes)
-        profile.object_classes.update({"chrome_space": _space, "chrome_isolate": _isolate, "chrome_document": _document, "resource": _resource, "treescope": _treeScope, "dom_element": _domElement, "htmlscriptelement": _domElement, "v8_heap": _v8_heap})
+        profile.object_classes.update({"chrome_document": _document, "resource": _resource, "treescope": _treeScope, "dom_element": _domElement, "htmlscriptelement": _domElement})
 
 class chrome_ragamuffin(linux_pslist.linux_pslist):
     """Recover some useful artifact from Chrome process memory"""
     urlparsed = []
 
     def __init__(self, config, *args, **kwargs):
-        config.add_option("dump_resource")
+        config.add_option("dump")
         linux_pslist.linux_pslist.__init__(self, config, *args, **kwargs)
     
-    def isolate_spaces_heap_entries(self, proc_as, task):
-        for (idx, codespace_ptr) in enumerate(task.search_process_memory([struct.pack('<II', 2, 1)], heap_only = False)):
-        #maybe NewSpace
-            space = obj.Object("chrome_space", vm=proc_as, offset=codespace_ptr - 32)
-            heap = obj.Object("v8_heap", vm=proc_as, offset=space.heap)
-            if heap.is_valid():
-                isolate = obj.Object("chrome_isolate", vm=proc_as, offset=heap.isolate_)
-                yield task, isolate.obj_offset
-
     def rummage_javascript(self, proc_as, task):
         #JavaScript beetween <script> and </script> tags
         Text_nodeFlags = 5122
@@ -239,10 +193,10 @@ class chrome_ragamuffin(linux_pslist.linux_pslist):
             for (document_offset, url, title) in DocumentScanner(proc_as).scan():
                 yield task, document_offset, url, title
 
-            for (task, ptr) in (self.isolate_spaces_heap_entries(proc_as, task)): #V8Scanner... too much beta for now
-                print task.pid, ptr
+            #for isolate_ptr in V8Scanner(proc_as, task).scan():
+                #print task.pid, isolate_ptr
 
-            if "dump_resource" in self._config.opts: #very ugly code but it works
+            if "dump" in self._config.opts:
                 for js in (self.rummage_javascript(proc_as, task)):
                     continue
 
