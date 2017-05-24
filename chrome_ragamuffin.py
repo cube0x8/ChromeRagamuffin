@@ -20,161 +20,295 @@
 @license: GNU General Public License 2.0 or later
 """
 
-import inspect
-import libchrome
+import libchrome_5803029110 as libchrome
 import struct
 import volatility.obj as obj
 import volatility.debug as debug
 import volatility.addrspace as addrspace
-import volatility.plugins.linux.common as linux_common
-import volatility.plugins.linux.pslist as linux_pslist
+import volatility.plugins.common as common
+import volatility.win32 as win32
+import volatility.utils as utils
 import volatility.scan as scan
 import volatility.utils as utils
 from volatility.renderers import TreeGrid
 import time
+import pdb
 
-document_list = []
-urlparsed = []
 
-class UrlParsedScanner():
-    task = None
-    proc_as = None
+class DocumentFlagScanner(scan.ScannerCheck):
+    def __init__(self, address_space, **kwargs):
+        scan.ScannerCheck.__init__(self, address_space)
 
-    def __init__(self, address_space, task):
-        self.task = task
-        self.proc_as = address_space
-
-    def scan(self):
-        for(idx, m_parsed_ptr) in enumerate(self.task.search_process_memory(libchrome.url_parsed_signatures, heap_only = False)):
-        #maybe a url::Parsed struct found. save it
-            urlparsed.append(m_parsed_ptr)
-        
-class DocumentScanner():
-    proc_as = None
-
-    def __init__(self, address_space):
-        self.proc_as = address_space
-
-    def scan(self):
-        for(m_parsed_ptr) in urlparsed:
-            #document start offset
-            document_start_offset = m_parsed_ptr - 528
-            document = obj.Object("chrome_document", vm=self.proc_as, offset=document_start_offset)
-            if self.is_valid(document):
-                document_list.append(document_start_offset)
-                yield document_start_offset, document.url_string, document.document_title
-
-    def is_valid(self, document):
-        if document.m_domWindow.m_document.v() == document.obj_offset: #mutual-reference Document <-> LocalDomWindow
+    def check(self, offset):
+        data = self.address_space.read(offset + 16, 0x4)
+        flag = struct.unpack("<I", data)[0]
+        if flag in libchrome.Document_nodeFlag:
+            # debug.info("Document flag hit! Return...")
             return True
         return False
 
-class V8Scanner():
-    proc_as = None
-    task = None
+    def skip(self, data, offset):
+        return 8
 
-    def __init__(self, address_space, task):
+
+class DocumentLocalDOMWindowPointerScanner(scan.ScannerCheck):
+    def __init__(self, address_space, **kwargs):
+        scan.ScannerCheck.__init__(self, address_space)
+
+    def check(self, offset):
+        # debug.info("check if pointer is not NULL")
+        LocalDOMWindow_p = self.address_space.read(offset + libchrome.LocalDOMWindow_offset, 0x8)
+        LocalDOMWindow_p = struct.unpack("<Q", LocalDOMWindow_p)[0]
+        if LocalDOMWindow_p != 0:
+            return True
+        return False
+
+    def skip(self, data, offset):
+        return 8
+
+
+class DocumentScanner(scan.BaseScanner):
+    checks = [("DocumentFlagScanner", {}),
+              ("DocumentLocalDOMWindowPointerScanner", {})
+              ]
+
+
+class DOMScanner():
+    def __init__(self, document, address_space):
+        self.document = document
         self.proc_as = address_space
-        self.task = task
+        self.dom = []
+
+    def wrap(self, node):
+        if node.nodeFlags() in libchrome.containerNodeFlags:
+            node = obj.Object("Element", vm=self.proc_as, offset=node.obj_offset)
+            if node.tagName == "form":
+                node = obj.Object("HTMLElementForm", vm=self.proc_as, offset=node.obj_offset)
+            if node.tagName == "iframe":
+                node = obj.Object("HTMLIframeElement", vm=self.proc_as, offset=node.obj_offset)
+        elif node.nodeFlags() in libchrome.otherFlags:
+            node = obj.Object("TextNode", vm=self.proc_as, offset=node.obj_offset)
+        return node
 
     def scan(self):
-        for (idx, codespace_ptr) in enumerate(self.task.search_process_memory([struct.pack('<II', 2, 1)], heap_only = False)):
-        #maybe NewSpace
-            space = obj.Object("chrome_space", vm=self.proc_as, offset=codespace_ptr - 32)
-            heap = obj.Object("v8_heap", vm=self.proc_as, offset=space.heap)
-            if self.is_valid(heap):
-                isolate = obj.Object("chrome_isolate", vm=self.proc_as, offset=heap.isolate_)
-                yield isolate.obj_offset
+        HTMLHtmlElement = self.document.documentElement.dereference()
+        # pdb.set_trace()
+        self.parseDOMTree(HTMLHtmlElement)
+        return self.dom
 
-    def is_valid(self, heap):
-        isolate = heap.isolate_.dereference()
-        if isolate.obj_offset == isolate.isolate_:
-            return True
+    def parseDOMTree(self, head):
+        head = self.wrap(head)
+        self.dom.append(head)
+        if head.nodeFlags() in libchrome.containerNodeFlags and self.proc_as.is_valid_address(
+                head.firstChild):  # container
+            self.parseDOMTree(head.firstChild.dereference())
+        if self.proc_as.is_valid_address(head.next):  # not container
+            self.parseDOMTree(head.next.dereference())
+        return
 
-class _treeScope(obj.CType):
-    def is_valid(self, document):
-        parentTreeScope = self.m_parentTreeScope
-        if parentTreeScope.m_document.v() == document:
-            return True
-        return False
 
-class _domElement(obj.CType):
-    def is_valid(self):
-        if self.m_treescope.m_document.v() in document_list and self.m_parentOrShadowHostNode.m_nodeFlags == 5148:
-            return True
-        return False
+class _node(obj.CType):
+    def nodeFlags(self):
+        return self.m_nodeFlags
 
     @property
-    def characters(self):
-        return libchrome.get_chrome_string(self, self.m_data)
+    def previous(self):
+        return self.m_previous
+
+    @property
+    def next(self):
+        return self.m_next
+
+    @property
+    def parentOrShadowHostNode(self):
+        return self.m_parentOrShadowHostNode
+
+    @property
+    def tagName(self):
+        return "unknown node"
+
+
+class _element(_node):
+    def nodeFlags(self):
+        return self.Container.Node.m_nodeFlags
+
+    @property
+    def previous(self):
+        return self.Container.Node.m_previous
+
+    @property
+    def next(self):
+        return self.Container.Node.m_next
+
+    @property
+    def parentOrShadowHostNode(self):
+        return self.Container.Node.m_parentOrShadowHostNode
 
     @property
     def firstChild(self):
-        return self.m_firstChild
+        return self.Container.m_firstChild
 
-class _resource(obj.CType):
-    def is_valid(self):
-        if self.m_type == 3 and self.m_status == 2:
-            return True
-        return False
-    
     @property
-    def plain_js(self):
-        script_buffer = obj.Object("js_buffer", vm=self.obj_vm, offset=self.script_buffer)
-        return libchrome.get_chrome_string(self, script_buffer.m_script)
+    def lastChild(self):
+        return self.Container.m_lastChild
+
+    @property
+    def tagName(self):
+        return libchrome.get_qualified_string(self, self.m_tagName)
+
+
+class _html_element_form(_element):
+    def nodeFlags(self):
+        return self.Element.Container.Node.m_nodeFlags
+
+    @property
+    def previous(self):
+        return self.Element.Container.Node.m_previous
+
+    @property
+    def next(self):
+        return self.Element.Container.Node.m_next
+
+    @property
+    def parentOrShadowHostNode(self):
+        return self.Element.Container.Node.m_parentOrShadowHostNode
+
+    @property
+    def firstChild(self):
+        return self.Element.Container.m_firstChild
+
+    @property
+    def lastChild(self):
+        return self.Element.Container.m_lastChild
+
+    @property
+    def tagName(self):
+        return libchrome.get_qualified_string(self, self.Element.m_tagName)
+
+    @property
+    def method(self):
+        return self.m_method
+
+    @property
+    def action(self):
+        return self.m_action
+
+
+class _html_iframe_element(_element):
+    def nodeFlags(self):
+        return self.Element.Container.Node.m_nodeFlags
+
+    @property
+    def previous(self):
+        return self.Element.Container.Node.m_previous
+
+    @property
+    def next(self):
+        return self.Element.Container.Node.m_next
+
+    @property
+    def parentOrShadowHostNode(self):
+        return self.Element.Container.Node.m_parentOrShadowHostNode
+
+    @property
+    def firstChild(self):
+        return self.Element.Container.m_firstChild
+
+    @property
+    def lastChild(self):
+        return self.Element.Container.m_lastChild
+
+    @property
+    def tagName(self):
+        return libchrome.get_qualified_string(self, self.Element.m_tagName)
+
+    @property
+    def src(self):
+        return self.m_URL
+
+
+class _textNode(_node):
+    def nodeFlags(self):
+        return self.Node.m_nodeFlags
+
+    @property
+    def previous(self):
+        return self.Node.m_previous
+
+    @property
+    def next(self):
+        return self.Node.m_next
+
+    @property
+    def parentOrShadowHostNode(self):
+        return self.Node.m_parentOrShadowHostNode
+
+    @property
+    def data(self):
+        return self.m_data
+
+    @property
+    def tagName(self):
+        return "Text"
+
+    def printNode(self):
+        return repr(libchrome.get_chrome_string(self, self.data))
+
 
 class _document(obj.CType):
-    @property
-    def documentElement(self):
-        return self.m_documentElement
-
     @property
     def url_string(self):
         url_string = libchrome.get_chrome_string(self, self.m_url)
         return url_string
 
     @property
-    def document_title(self):
+    def title(self):
         title = libchrome.get_chrome_string(self, self.m_title)
         return title
+
+    def is_valid(self):
+        # debug.info("Document validation")
+        if self.m_domWindow.m_document.v() == self.obj_offset:
+            return True
+        return False
+
+    @property
+    def documentElement(self):
+        return self.m_documentElement
+
 
 class ChromeTypes(obj.ProfileModification):
     def modification(self, profile):
         profile.vtypes.update(libchrome.chrome_vtypes)
-        profile.object_classes.update({"chrome_document": _document, "resource": _resource, "treescope": _treeScope, "dom_element": _domElement, "htmlscriptelement": _domElement})
+        profile.object_classes.update(
+            {"chrome_document": _document, "TextNode": _textNode, "Element": _element,
+             "DOMNode": _node, "HTMLElementForm": _html_element_form, "HTMLIframeElement": _html_iframe_element})
 
-class chrome_ragamuffin(linux_pslist.linux_pslist):
+
+class chrome_ragamuffin(common.AbstractWindowsCommand):
     """Recover some useful artifact from Chrome process memory"""
     urlparsed = []
 
     def __init__(self, config, *args, **kwargs):
-        config.add_option("dump")
-        linux_pslist.linux_pslist.__init__(self, config, *args, **kwargs)
-    
-    def rummage_javascript(self, proc_as, task):
-        #JavaScript beetween <script> and </script> tags
-        Text_nodeFlags = 5122
-        
-        for (idx, element) in enumerate(task.search_process_memory([struct.pack("<Q", Text_nodeFlags)], heap_only=False)):
-            htmlscriptelement = obj.Object("dom_element", vm=proc_as, offset=element-16)
-            if htmlscriptelement.is_valid():
-                #print("element start offset: %s" % (hex(proc_as.vtop(element - 16))))
-                print htmlscriptelement.characters
+        common.AbstractWindowsCommand.__init__(self, config, *args, **kwargs)
 
-        #external JavaScript included with "src".
-        for m_parsed_ptr in self.urlparsed:
-            m_preloadResults_offset = m_parsed_ptr - 88
-            resource = obj.Object("resource", vm=proc_as, offset=m_preloadResults_offset)
-            if resource.is_valid():
-                print resource.plain_js
-                yield resource.plain_js
+        config.add_option('PID', short_option='p', default=None,
+                          help='Operate on these Process IDs (comma-separated)',
+                          action='store', type='str')
+        config.add_option('documents', default=None,
+                          help='Blink::Document\'s offsets (comma separated values)',
+                          action='store', type='str')
+        config.add_option('dom_analysis', default=None,
+                          help='Parse DOM Tree',
+                          action='store', type='str')
 
     def calculate(self):
-        linux_common.set_plugin_members(self)
+        addr_space = utils.load_as(self._config)
+        tasks = win32.tasks.pslist(addr_space)
 
-        tasks = linux_pslist.linux_pslist(self._config).calculate()
-    
         for task in tasks:
+            proc_name = task.ImageFileName
+            proc_pid = task.UniqueProcessId
             proc_as = task.get_process_address_space()
 
             # In cases when mm is an invalid pointer
@@ -182,23 +316,34 @@ class chrome_ragamuffin(linux_pslist.linux_pslist):
                 continue
 
             # We scan just chrome instances
-            if  str(task.comm) != "chrome":
+            if str(proc_name) != "chrome.exe":
                 continue
 
-            if "pid" in self._config.opts and str(task.pid) != str(self._config.opts["pid"]):
+            if "pid" in self._config.opts and str(proc_pid) != str(self._config.opts["pid"]):
                 continue
 
-            UrlParsedScanner(proc_as, task).scan()
+            debug.info("Running on process PID %d PROC_NAME %s" % (proc_pid, proc_name))
 
-            for (document_offset, url, title) in DocumentScanner(proc_as).scan():
-                yield task, document_offset, url, title
+            document_pointers = []
+            documents = []
+            if "documents" in self._config.opts:
+                document_pointers = [int(p, 16) for p in self._config.opts["documents"].split(',')]
+            else:
+                for document_offset in DocumentScanner().scan(proc_as):
+                    document_pointers.append(document_offset)
 
-            #for isolate_ptr in V8Scanner(proc_as, task).scan():
-                #print task.pid, isolate_ptr
+            for document_pointer in document_pointers:
+                if proc_as.is_valid_address(document_pointer):
+                    document = obj.Object("chrome_document", vm=proc_as, offset=document_pointer)
+                    if document.is_valid():
+                        documents.append(document)
+                        yield task, document.obj_offset, document.url_string, document.title
 
-            if "dump" in self._config.opts:
-                for js in (self.rummage_javascript(proc_as, task)):
-                    continue
+            if "dom_analysis" in self._config.opts:
+                for document in documents:
+                    DOMTreeParser = DOMScanner(document, proc_as)
+                    DOM = DOMTreeParser.scan()
+                    yield DOM
 
     def unified_output(self, data):
         return TreeGrid([("Pid", int),
@@ -218,4 +363,27 @@ class chrome_ragamuffin(linux_pslist.linux_pslist):
                                   ("Title", "50")])
 
         for task, offs, url, title in data:
-            self.table_row(outfd, task.pid, hex(offs), str(url), str(title))
+            self.table_row(outfd, task.UniqueProcessId, hex(offs), str(url), str(title))
+
+    def render_dot(self, outfd, data):
+        lst = list(data)
+        task = lst[0][0]
+        # pdb.set_trace()
+        outfd.write("/" + "*" * 72 + "/\n")
+        outfd.write("/* Pid: {0:6} */\n".format(task.UniqueProcessId))
+        outfd.write("digraph DOMTree {\n")
+        outfd.write("graph [rankdir = \"TB\"];\n")
+        DOMTree = lst[1]
+        fillcolor = "white"
+        for node in DOMTree:
+            if node:
+                if node.parentOrShadowHostNode:
+                    outfd.write(
+                        "node_{0:08x} -> node_{1:08x}\n".format(
+                            node.parentOrShadowHostNode.dereference().obj_offset or 0, node.obj_offset))
+                    outfd.write("node_{0:08x} [label = \"{{ {1}_0x{0:08x} }}\" "
+                                "shape = \"record\" color = \"blue\" style = \"filled\" fillcolor = \"{2}\"];\n".format(
+                        node.obj_offset,
+                        node.tagName,
+                        fillcolor))
+        outfd.write("}\n")
