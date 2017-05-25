@@ -33,6 +33,7 @@ import volatility.utils as utils
 from volatility.renderers import TreeGrid
 import time
 import pdb
+import ipdb
 
 
 class DocumentFlagScanner(scan.ScannerCheck):
@@ -298,9 +299,6 @@ class chrome_ragamuffin(common.AbstractWindowsCommand):
         config.add_option('documents', default=None,
                           help='Blink::Document\'s offsets (comma separated values)',
                           action='store', type='str')
-        config.add_option('dom_analysis', default=None,
-                          help='Parse DOM Tree',
-                          action='store', type='str')
 
     def calculate(self):
         addr_space = utils.load_as(self._config)
@@ -337,53 +335,36 @@ class chrome_ragamuffin(common.AbstractWindowsCommand):
                     document = obj.Object("chrome_document", vm=proc_as, offset=document_pointer)
                     if document.is_valid():
                         documents.append(document)
-                        yield task, document.obj_offset, document.url_string, document.title
+                        DOMTreeParser = DOMScanner(document, proc_as)
+                        DOM = DOMTreeParser.scan()
+                        yield proc_pid, document, DOM
 
-            if "dom_analysis" in self._config.opts:
-                for document in documents:
-                    DOMTreeParser = DOMScanner(document, proc_as)
-                    DOM = DOMTreeParser.scan()
-                    yield DOM
-
-    def unified_output(self, data):
-        return TreeGrid([("Pid", int),
-                         ("Document offset", str),
-                         ("URL", str),
-                         ("Title", str)],
-                        self.generator(data))
-
-    def generator(self, data):
-        for task, ptr, url, title, n_js, js_list in data:
-            yield (0, [int(task), str(ptr), str(url), str(title)])
 
     def render_text(self, outfd, data):
         self.table_header(outfd, [("Pid", "8"),
                                   ("Document offset", "20"),
                                   ("URL", "50"),
-                                  ("Title", "50")])
-
-        for task, offs, url, title in data:
-            self.table_row(outfd, task.UniqueProcessId, hex(offs), str(url), str(title))
+                                  ("Title", "50"),
+                                  ("DOM start address", "8")])
+        for pid, document, DOM in data:
+            self.table_row(outfd, pid, hex(document.obj_offset), str(document.url_string), str(document.title), hex(document.documentElement.v()))
 
     def render_dot(self, outfd, data):
-        lst = list(data)
-        task = lst[0][0]
-        # pdb.set_trace()
-        outfd.write("/" + "*" * 72 + "/\n")
-        outfd.write("/* Pid: {0:6} */\n".format(task.UniqueProcessId))
-        outfd.write("digraph DOMTree {\n")
-        outfd.write("graph [rankdir = \"TB\"];\n")
-        DOMTree = lst[1]
         fillcolor = "white"
-        for node in DOMTree:
-            if node:
-                if node.parentOrShadowHostNode:
-                    outfd.write(
-                        "node_{0:08x} -> node_{1:08x}\n".format(
-                            node.parentOrShadowHostNode.dereference().obj_offset or 0, node.obj_offset))
-                    outfd.write("node_{0:08x} [label = \"{{ {1}_0x{0:08x} }}\" "
-                                "shape = \"record\" color = \"blue\" style = \"filled\" fillcolor = \"{2}\"];\n".format(
-                        node.obj_offset,
-                        node.tagName,
-                        fillcolor))
-        outfd.write("}\n")
+        for pid, document, DOM in data:
+            outfd.write("/" + "*" * 72 + "/\n")
+            outfd.write("/* Pid: {0:6}, url: {1} */\n".format(pid, str(document.url_string)))
+            outfd.write("digraph DOMTree {\n")
+            outfd.write("graph [rankdir = \"TB\"];\n")
+            for node in DOM:
+                if node:
+                    if node.parentOrShadowHostNode:
+                        outfd.write(
+                            "node_{0:08x} -> node_{1:08x}\n".format(
+                                node.parentOrShadowHostNode.dereference().obj_offset or 0, node.obj_offset))
+                        outfd.write("node_{0:08x} [label = \"{{ {1}_0x{0:08x} }}\" "
+                                    "shape = \"record\" color = \"blue\" style = \"filled\" fillcolor = \"{2}\"];\n".format(
+                            node.obj_offset,
+                            node,
+                            fillcolor))
+            outfd.write("}\n")
