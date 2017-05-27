@@ -365,6 +365,6 @@ class chrome_ragamuffin(common.AbstractWindowsCommand):
                         outfd.write("node_{0:08x} [label = \"{{ {1}_0x{0:08x} }}\" "
                                     "shape = \"record\" color = \"blue\" style = \"filled\" fillcolor = \"{2}\"];\n".format(
                             node.obj_offset,
-                            node,
+                            node.tagName,
                             fillcolor))
             outfd.write("}\n")
