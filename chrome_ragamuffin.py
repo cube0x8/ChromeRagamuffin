@@ -16,7 +16,7 @@
 # Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA 
 #
 """
-@author: Alessandro De Vito (@Cube)
+@author: Alessandro De Vito (@_cube0x8)
 @license: GNU General Public License 2.0 or later
 """
 
@@ -32,9 +32,6 @@ import volatility.scan as scan
 import volatility.utils as utils
 from volatility.renderers import TreeGrid
 import time
-import pdb
-import ipdb
-
 
 class DocumentFlagScanner(scan.ScannerCheck):
     def __init__(self, address_space, **kwargs):
