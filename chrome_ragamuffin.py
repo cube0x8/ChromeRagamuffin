@@ -1,4 +1,4 @@
-# Copyright (C) 2017 Alessandro De Vito (@Cube)
+# Copyright (C) 2017 Alessandro De Vito (@_cube0x8)
 # Donated under Volatility Foundation, Inc. Individual Contributor Licensing Agreement
 #
 # This program is free software; you can redistribute it and/or modify
@@ -84,6 +84,8 @@ class DOMScanner():
                 node = obj.Object("HTMLElementForm", vm=self.proc_as, offset=node.obj_offset)
             if node.tagName == "iframe":
                 node = obj.Object("HTMLIframeElement", vm=self.proc_as, offset=node.obj_offset)
+            if node.tagName == "a":
+                node = obj.Object("HTMLAnchorElement", vm=self.proc_as, offset=node.obj_offset)
         elif node.nodeFlags() in libchrome.otherFlags:
             node = obj.Object("TextNode", vm=self.proc_as, offset=node.obj_offset)
         return node
@@ -224,6 +226,49 @@ class _html_iframe_element(_element):
     def src(self):
         return self.m_URL
 
+    @property
+    def contentDocument(self):
+        return self.m_contentFrame.m_domWindow.m_document.dereference()
+
+
+class _html_anchor_element(_element):
+    def nodeFlags(self):
+        return self.Element.Container.Node.m_nodeFlags
+
+    @property
+    def previous(self):
+        return self.Element.Container.Node.m_previous
+
+    @property
+    def next(self):
+        return self.Element.Container.Node.m_next
+
+    @property
+    def parentOrShadowHostNode(self):
+        return self.Element.Container.Node.m_parentOrShadowHostNode
+
+    @property
+    def firstChild(self):
+        return self.Element.Container.m_firstChild
+
+    @property
+    def lastChild(self):
+        return self.Element.Container.m_lastChild
+
+    @property
+    def tagName(self):
+        return libchrome.get_qualified_string(self, self.Element.m_tagName)
+
+    def href(self):
+        elementData_offset = self.Element.m_elementData.v()
+        shareableElementData = obj.Object("ShareableElementData", vm=self.obj_vm, offset=elementData_offset)
+        attribute_href = shareableElementData.m_attribute
+        return attribute_href.getValue
+
+class _attributes(obj.CType):
+    @property
+    def getValue(self):
+        return libchrome.get_chrome_string(self, self.m_value)
 
 class _textNode(_node):
     def nodeFlags(self):
@@ -280,7 +325,7 @@ class ChromeTypes(obj.ProfileModification):
         profile.vtypes.update(libchrome.chrome_vtypes)
         profile.object_classes.update(
             {"chrome_document": _document, "TextNode": _textNode, "Element": _element,
-             "DOMNode": _node, "HTMLElementForm": _html_element_form, "HTMLIframeElement": _html_iframe_element})
+             "DOMNode": _node, "HTMLElementForm": _html_element_form, "HTMLIframeElement": _html_iframe_element, "HTMLAnchorElement": _html_anchor_element, "Attribute": _attributes})
 
 
 class chrome_ragamuffin(common.AbstractWindowsCommand):
@@ -347,19 +392,30 @@ class chrome_ragamuffin(common.AbstractWindowsCommand):
             self.table_row(outfd, pid, hex(document.obj_offset), str(document.url_string), str(document.title), hex(document.documentElement.v()))
 
     def render_dot(self, outfd, data):
-        fillcolor = "white"
         for pid, document, DOM in data:
             outfd.write("/" + "*" * 72 + "/\n")
             outfd.write("/* Pid: {0:6}, url: {1} */\n".format(pid, str(document.url_string)))
             outfd.write("digraph DOMTree {\n")
             outfd.write("graph [rankdir = \"TB\"];\n")
             for node in DOM:
+                fillcolor = "white"
                 if node:
                     if node.parentOrShadowHostNode:
                         outfd.write(
                             "node_{0:08x} -> node_{1:08x}\n".format(
                                 node.parentOrShadowHostNode.dereference().obj_offset or 0, node.obj_offset))
-                        outfd.write("node_{0:08x} [label = \"{{ {1}_0x{0:08x} }}\" "
+                        if node.tagName == "iframe":
+                            fillcolor = "yellow"
+                            outfd.write("node_{0:08x} [label = \"{{ {1}_0x{0:08x} | iframe document offset: 0x{3:08x} }}\" "
+                                    "shape = \"record\" color = \"blue\" style = \"filled\" fillcolor = \"{2}\"];\n".format(
+                            node.obj_offset,
+                            node.tagName,
+                            fillcolor,
+                            node.contentDocument.v()))
+                        else:
+			    if node.tagName == "a":
+				fillcolor = "red"
+                            outfd.write("node_{0:08x} [label = \"{{ {1}_0x{0:08x} }}\" "
                                     "shape = \"record\" color = \"blue\" style = \"filled\" fillcolor = \"{2}\"];\n".format(
                             node.obj_offset,
                             node.tagName,

@@ -1,27 +1,5 @@
-# Copyright (C) 2017 Alessandro De Vito (@Cube)
-# Donated under Volatility Foundation, Inc. Individual Contributor Licensing Agreement
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or (at
-# your option) any later version.
-#
-# This program is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-# General Public License for more details. 
-#
-# You should have received a copy of the GNU General Public License
-# along with this program; if not, write to the Free Software
-# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA 
-#
-"""
-@author: Alessandro De Vito (@_cube0x8)
-@license: GNU General Public License 2.0 or later
-"""
-
-import struct
 import volatility.obj as obj
+import struct
 
 chrome_vtypes = {
     'stringimpl': [12, {
@@ -40,6 +18,13 @@ chrome_vtypes = {
     }],
     'ElementData': [0, {
     }],
+    'ShareableElementData': [40, {
+        'm_attribute': [32, ['Attribute']],
+    }],
+    'Attribute': [16, {
+        "m_name": [0, ['pointer', ['qualifiedstringimpl']]],
+        "m_value": [8, ['pointer', ['stringimpl']]],
+    }],
     'DOMNode': [40, {
         'm_nodeFlags': [16, ['unsigned int']],
         'm_parentOrShadowHostNode': [24, ['pointer', ['ContainerNode']]],
@@ -55,7 +40,7 @@ chrome_vtypes = {
     'Element': [72, {
         'Container': [0, ['ContainerNode']],
         'm_tagName': [80, ['pointer', ['stringimpl']]],
-        'm_elementData': [88, ['ElementData']]
+        'm_elementData': [88, ['pointer', ['ElementData']]]
     }],
     'TextNode': [48, {
         'Node': [0, ['DOMNode']],
@@ -74,7 +59,14 @@ chrome_vtypes = {
     }],
     'HTMLIframeElement': [328, {
         'Element': [0, ['Element']],
+        'm_contentFrame': [112, ['pointer', ['LocalFrame']]],
         'm_URL': [152, ['pointer', ['stringimpl']]]
+    }],
+    'HTMLAnchorElement': [144, {
+        'Element': [0, ['Element']],
+    }],
+    'LocalFrame': [464, {
+        'm_domWindow': [56, ['pointer', ['local_dom_window']]],
     }],
     'chrome_document': [3064, {
         'm_nodeFlags': [16, ['unsigned int']],
@@ -109,10 +101,13 @@ Document_nodeFlag = [struct.unpack("<I", "\x04\x14\x0e\x00")[0],  # 922628
                      ]
 
 containerNodeFlags = [struct.unpack("<I", "\x1c\x16\x00\x00")[0],  # 5660
+                      struct.unpack("<I", "\x1c\x14\x02\x00")[0],  # 136220, html
                       struct.unpack("<I", "\x1c\x14\x00\x00")[0],  # 5148
                       struct.unpack("<I", "\x1d\x14\x00\x00")[0],  # 5149, (form, iframe)
                       struct.unpack("<I", "\x1d\x16\x00\x00")[0],  # 5661
                       struct.unpack("<I", "\x1c\x14\x40\x00")[0],  # 4199452
+                      struct.unpack("<I", "\x1d\x14\x82\x00")[0],  # 8524829, body
+                      struct.unpack("<I", "\x1c\x15\x00\x00")[0],  # 5404, anchor
                       # da qui in giu meritano un oggetto personale
                       struct.unpack("<I", "\x1d\x34\x00\x00")[0],  # 13341, input, textarea
                       struct.unpack("<I", "\x1c\x34\x00\x00")[0],  # 13340, button
