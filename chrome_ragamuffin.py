@@ -32,6 +32,8 @@ import volatility.scan as scan
 import volatility.utils as utils
 from volatility.renderers import TreeGrid
 import time
+import pdb
+import ipdb
 
 class DocumentFlagScanner(scan.ScannerCheck):
     def __init__(self, address_space, **kwargs):
@@ -72,8 +74,8 @@ class DocumentScanner(scan.BaseScanner):
 
 
 class DOMScanner():
-    def __init__(self, document, address_space):
-        self.document = document
+    def __init__(self, rootNode, address_space):
+        self.rootNode = rootNode
         self.proc_as = address_space
         self.dom = []
 
@@ -91,21 +93,20 @@ class DOMScanner():
         return node
 
     def scan(self):
-        HTMLHtmlElement = self.document.documentElement.dereference()
+        HTMLHtmlElement = obj.Object("DOMNode", vm=self.proc_as, offset=self.rootNode)
         # pdb.set_trace()
         self.parseDOMTree(HTMLHtmlElement)
         return self.dom
 
-    def parseDOMTree(self, head):
-        head = self.wrap(head)
-        self.dom.append(head)
-        if head.nodeFlags() in libchrome.containerNodeFlags and self.proc_as.is_valid_address(
-                head.firstChild):  # container
-            self.parseDOMTree(head.firstChild.dereference())
-        if self.proc_as.is_valid_address(head.next):  # not container
-            self.parseDOMTree(head.next.dereference())
+    def parseDOMTree(self, root):
+        root = self.wrap(root)
+        self.dom.append(root)
+        if root.nodeFlags() in libchrome.containerNodeFlags and self.proc_as.is_valid_address(
+                root.firstChild):  # container
+            self.parseDOMTree(root.firstChild.dereference())
+        if self.proc_as.is_valid_address(root.next):  # not container
+            self.parseDOMTree(root.next.dereference())
         return
-
 
 class _node(obj.CType):
     def nodeFlags(self):
@@ -127,8 +128,59 @@ class _node(obj.CType):
     def tagName(self):
         return "unknown node"
 
+    def printNode(self):
+	print "Node tag: {0}\nMemory offset: 0x{1:08x}\n".format(
+		self.tagName,
+		self.obj_offset)
 
-class _element(_node):
+class _element_mixin():
+    def nodeFlags(self):
+        return self.Element.Container.Node.m_nodeFlags
+
+    @property
+    def previous(self):
+        return self.Element.Container.Node.m_previous
+
+    @property
+    def next(self):
+        return self.Element.Container.Node.m_next
+
+    @property
+    def parentOrShadowHostNode(self):
+        return self.Element.Container.Node.m_parentOrShadowHostNode
+
+    @property
+    def firstChild(self):
+        return self.Element.Container.m_firstChild
+
+    @property
+    def lastChild(self):
+        return self.Element.Container.m_lastChild
+
+    @property
+    def tagName(self):
+        return libchrome.get_qualified_string(self, self.Element.m_tagName)
+
+    def get_attributes(self):
+        attributes = dict()
+
+        elementData_offset = self.Element.m_elementData.v()
+        shareableElementData = obj.Object("ShareableElementData", vm=self.obj_vm, offset=elementData_offset)
+        Attribute = shareableElementData.m_attribute
+        while self.obj_vm.is_valid_address(Attribute.m_name.v()):
+            m_name = libchrome.get_qualified_string(Attribute, Attribute.m_name)
+            m_value = libchrome.get_chrome_string(Attribute, Attribute.m_value)
+            attributes[m_name] = m_value
+            Attribute = obj.Object("Attribute", vm=self.obj_vm, offset=Attribute.v()+Attribute.struct_size)
+        return attributes
+
+    def printNode(self):
+	print "Node tag: {0}\nNode attributes: {1}\nMemory offset: 0x{2:08x}\n".format(
+		self.tagName,
+		self.get_attributes(),
+		self.obj_offset)
+
+class _element(obj.CType):
     def nodeFlags(self):
         return self.Container.Node.m_nodeFlags
 
@@ -156,35 +208,27 @@ class _element(_node):
     def tagName(self):
         return libchrome.get_qualified_string(self, self.m_tagName)
 
+    def get_attributes(self):
+        attributes = dict()
 
-class _html_element_form(_element):
-    def nodeFlags(self):
-        return self.Element.Container.Node.m_nodeFlags
+        elementData_offset = self.m_elementData.v()
+        shareableElementData = obj.Object("ShareableElementData", vm=self.obj_vm, offset=elementData_offset)
+        Attribute = shareableElementData.m_attribute
+        while self.obj_vm.is_valid_address(Attribute.m_name.v()):
+            m_name = libchrome.get_qualified_string(Attribute, Attribute.m_name)
+            m_value = libchrome.get_chrome_string(Attribute, Attribute.m_value)
+            attributes[m_name] = m_value
+            Attribute = obj.Object("Attribute", vm=self.obj_vm, offset=Attribute.v()+Attribute.struct_size)
+        return attributes
 
-    @property
-    def previous(self):
-        return self.Element.Container.Node.m_previous
+    def printNode(self):
+	print "Node tag: {0}\nNode attributes: {1}\nMemory offset: 0x{2:08x}\n".format(
+		self.tagName,
+		self.get_attributes(),
+		self.obj_offset)
 
-    @property
-    def next(self):
-        return self.Element.Container.Node.m_next
 
-    @property
-    def parentOrShadowHostNode(self):
-        return self.Element.Container.Node.m_parentOrShadowHostNode
-
-    @property
-    def firstChild(self):
-        return self.Element.Container.m_firstChild
-
-    @property
-    def lastChild(self):
-        return self.Element.Container.m_lastChild
-
-    @property
-    def tagName(self):
-        return libchrome.get_qualified_string(self, self.Element.m_tagName)
-
+class _html_element_form(_element_mixin, obj.CType):
     @property
     def method(self):
         return self.m_method
@@ -194,34 +238,7 @@ class _html_element_form(_element):
         return self.m_action
 
 
-class _html_iframe_element(_element):
-    def nodeFlags(self):
-        return self.Element.Container.Node.m_nodeFlags
-
-    @property
-    def previous(self):
-        return self.Element.Container.Node.m_previous
-
-    @property
-    def next(self):
-        return self.Element.Container.Node.m_next
-
-    @property
-    def parentOrShadowHostNode(self):
-        return self.Element.Container.Node.m_parentOrShadowHostNode
-
-    @property
-    def firstChild(self):
-        return self.Element.Container.m_firstChild
-
-    @property
-    def lastChild(self):
-        return self.Element.Container.m_lastChild
-
-    @property
-    def tagName(self):
-        return libchrome.get_qualified_string(self, self.Element.m_tagName)
-
+class _html_iframe_element(_element_mixin, obj.CType):
     @property
     def src(self):
         return self.m_URL
@@ -230,47 +247,26 @@ class _html_iframe_element(_element):
     def contentDocument(self):
         return self.m_contentFrame.m_domWindow.m_document.dereference()
 
+    def printNode(self):
+	print "Node tag: {0}\nNode attributes: {1}\nsrc: {2}\nMemory offset: 0x{3:08x}\nContained document offset: 0x{4:08x}\n".format(
+		self.tagName,
+		self.get_attributes(),
+		libchrome.get_chrome_string(self, self.src),
+		self.obj_offset,
+		self.contentDocument)
 
-class _html_anchor_element(_element):
-    def nodeFlags(self):
-        return self.Element.Container.Node.m_nodeFlags
-
-    @property
-    def previous(self):
-        return self.Element.Container.Node.m_previous
-
-    @property
-    def next(self):
-        return self.Element.Container.Node.m_next
-
-    @property
-    def parentOrShadowHostNode(self):
-        return self.Element.Container.Node.m_parentOrShadowHostNode
-
-    @property
-    def firstChild(self):
-        return self.Element.Container.m_firstChild
-
-    @property
-    def lastChild(self):
-        return self.Element.Container.m_lastChild
-
-    @property
-    def tagName(self):
-        return libchrome.get_qualified_string(self, self.Element.m_tagName)
-
+class _html_anchor_element(_element_mixin, obj.CType):
     def href(self):
-        elementData_offset = self.Element.m_elementData.v()
-        shareableElementData = obj.Object("ShareableElementData", vm=self.obj_vm, offset=elementData_offset)
-        attribute_href = shareableElementData.m_attribute
-        return attribute_href.getValue
+        attributes = self.get_attributes()
+        return attributes["href"] if "href" in attributes.keys() else None
+
 
 class _attributes(obj.CType):
     @property
     def getValue(self):
         return libchrome.get_chrome_string(self, self.m_value)
 
-class _textNode(_node):
+class _textNode(obj.CType):
     def nodeFlags(self):
         return self.Node.m_nodeFlags
 
@@ -295,7 +291,9 @@ class _textNode(_node):
         return "Text"
 
     def printNode(self):
-        return repr(libchrome.get_chrome_string(self, self.data))
+	print "Node tag: {0}\nContent: {1}\n".format(
+		self.tagName,
+		libchrome.get_chrome_string(self, self.data))
 
 
 class _document(obj.CType):
@@ -341,6 +339,9 @@ class chrome_ragamuffin(common.AbstractWindowsCommand):
         config.add_option('documents', default=None,
                           help='Blink::Document\'s offsets (comma separated values)',
                           action='store', type='str')
+	config.add_option('dom', default=None,
+			  help='DOM root node offset. This will dump the DOM tree (use it only with -p option)',
+			  action='store', type='str')
 
     def calculate(self):
         addr_space = utils.load_as(self._config)
@@ -365,7 +366,7 @@ class chrome_ragamuffin(common.AbstractWindowsCommand):
             debug.info("Running on process PID %d PROC_NAME %s" % (proc_pid, proc_name))
 
             document_pointers = []
-            documents = []
+	    document = None
             if "documents" in self._config.opts:
                 document_pointers = [int(p, 16) for p in self._config.opts["documents"].split(',')]
             else:
@@ -374,12 +375,16 @@ class chrome_ragamuffin(common.AbstractWindowsCommand):
 
             for document_pointer in document_pointers:
                 if proc_as.is_valid_address(document_pointer):
-                    document = obj.Object("chrome_document", vm=proc_as, offset=document_pointer)
-                    if document.is_valid():
-                        documents.append(document)
-                        DOMTreeParser = DOMScanner(document, proc_as)
-                        DOM = DOMTreeParser.scan()
-                        yield proc_pid, document, DOM
+                    document_tmp = obj.Object("chrome_document", vm=proc_as, offset=document_pointer)
+                    if document_tmp.is_valid():
+			document = document_tmp
+	    DOM = None
+	    if "dom" in self._config.opts and "pid" in self._config.opts:
+		rootNode = int(self._config.opts["dom"], 16)
+		if proc_as.is_valid_address(rootNode):
+			DOMTreeParser = DOMScanner(rootNode, proc_as)
+			DOM = DOMTreeParser.scan()
+            yield proc_pid, document, DOM
 
 
     def render_text(self, outfd, data):
@@ -389,7 +394,11 @@ class chrome_ragamuffin(common.AbstractWindowsCommand):
                                   ("Title", "50"),
                                   ("DOM start address", "8")])
         for pid, document, DOM in data:
-            self.table_row(outfd, pid, hex(document.obj_offset), str(document.url_string), str(document.title), hex(document.documentElement.v()))
+	  if document is not None:
+            self.table_row(outfd, pid, hex(document.obj_offset), str(document.url_string), str(document.title), hex(document.documentElement.v())[:-1])
+	if DOM is not None:
+	   for node in DOM:
+	     node.printNode()
 
     def render_dot(self, outfd, data):
         for pid, document, DOM in data:
