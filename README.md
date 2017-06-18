@@ -138,10 +138,9 @@ Content:
 
 Node tag: Text
 Content: 
-
 ```
 
-##Analysis with *volshell* plugin:
+## Analysis with *volshell* plugin:
 Below, I'll show you some example using Volatility volshell plugin. With its help we can perform a targeted analysis on DOM's elements that interest us.
 
 1) Get DOM Tree:
