@@ -1,6 +1,8 @@
 # Chrome Ragamuffin
 Volatility plugins to extract some useful information from Google Chrome's address space.
 
+**NOTE: I'm testing the features about navigation history and in-memory cache. I'm gonna push it as soon as possible**
+
 The goal of this plugin is to make possible the analysis of a Google Chrome running instance. Starting from a memory dump, 
 Chrome Ragamuffin can list which page was open on which tab and it is able to extract the DOM Tree in order to analyze the full page structure.
 
@@ -13,6 +15,8 @@ Chrome Ragamuffin is shipped with libchrome_*$browserrelease*.py libraries. Thes
 - [x] DOM Analysis
 - [x] Active HTML Documents overview
 - [x] Google Chrome (64-bit) on Windows OSes
+- [X] History Extraction from the Browser Process (**coming soon!**)
+- [X] In-memory cache analysis (**coming soon!**)
 - [ ] JavaScript execution analysis
 - [ ] HTTP requests/responses analysis
 - [ ] Big endian support
