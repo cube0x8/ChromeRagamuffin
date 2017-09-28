@@ -23,7 +23,6 @@
 import libchrome_600311290 as libchrome
 import struct
 import volatility.obj as obj
-import volatility.debug as debug
 import volatility.addrspace as addrspace
 import volatility.plugins.common as common
 import volatility.win32 as win32
@@ -31,9 +30,6 @@ import volatility.utils as utils
 import volatility.scan as scan
 import volatility.utils as utils
 from volatility.renderers import TreeGrid
-import time
-import csv
-import ipdb
 
 class DocumentFlagScanner(scan.ScannerCheck):
     def __init__(self, address_space, **kwargs):
@@ -43,7 +39,6 @@ class DocumentFlagScanner(scan.ScannerCheck):
         data = self.address_space.read(offset + 16, 0x4)
         flag = struct.unpack("<I", data)[0]
         if flag in libchrome.Document_nodeFlag:
-            #debug.info("Document flag hit! Return...")
             return True
         return False
 
@@ -410,7 +405,6 @@ class _document(obj.CType):
         return title
 
     def is_valid(self):
-        # debug.info("Document validation")
         if self.m_domWindow.m_document.v() == self.obj_offset:
             return True
         return False
@@ -661,11 +655,8 @@ class chrome_ragamuffin(common.AbstractWindowsCommand):
             if "pid" in self._config.opts and str(proc_pid) != str(self._config.opts["pid"]):
                 continue
 
-            debug.info("Running on process PID %d PROC_NAME %s" % (proc_pid, proc_name))
-
             if "analysis" in self._config.opts and self._config.opts["analysis"] == "history":
                     if history_done is False:
-                        debug.info("Search for history")
                         navigation_controllers = []
                         web_contents = []
                         for navigation_controller in NavigationControllerScanner().scan(proc_as):
@@ -777,7 +768,6 @@ class chrome_ragamuffin(common.AbstractWindowsCommand):
 
     def render_csv(self, outfd, data):
         if "analysis" in self._config.opts:
-            #ipdb.set_trace()
             outfd.write('ID$Offset$Title$User typed url$Original request url$Status code$Method$Post params$Transition$Referer$Redirect chain$UTC Timestamp$Restore Type$Type page\n')
             for id, offset, title, user_typed_url, original_request_url, http_status_code, method, post_data, transition, referer, redirect_chain, timestamp, restore_type, page_type in data:
                 row_output = "{0}${1}${2}${3}${4}${5}${6}${7}${8}${9}${10}${11}${12}${13}\n".format(
