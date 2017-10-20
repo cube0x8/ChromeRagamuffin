@@ -804,11 +804,14 @@ class chrome_ragamuffin(common.AbstractWindowsCommand):
                     if node:
                         if node.parentOrShadowHostNode:
                             outfd.write(
-                                "node_0x{0:08x} -> node_0x{1:08x}\n".format(
-                                    node.parentOrShadowHostNode.dereference().obj_offset or 0, node.obj_offset))
+                                "{2}_0x{0:08x} -> {3}_0x{1:08x}\n".format(
+                                    node.parentOrShadowHostNode.dereference().obj_offset or 0, 
+                                    node.obj_offset, 
+                                    node.parentOrShadowHostNode.dereference().tagName, 
+                                    node.tagName))
                             if node.tagName == "iframe":
                                 fillcolor = "yellow"
-                                outfd.write("node_0x{1:08x} [label = \"{{ {0} | node_0x{1:08x} | iframe document offset: 0x{2:08x} }}\" "
+                                outfd.write("{0}_0x{1:08x} [label = \"{{ {0} | node_0x{1:08x} | iframe document offset: 0x{2:08x} }}\" "
                                         "shape = \"record\" color = \"blue\" style = \"filled\" fillcolor = \"{3}\"];\n".format(
                                 node.tagName,
                                 node.obj_offset,
@@ -817,7 +820,7 @@ class chrome_ragamuffin(common.AbstractWindowsCommand):
                             else:
                                 if node.tagName == "a":
                                     fillcolor = "red"
-                                    outfd.write("node_0x{0:08x} [label = \"{{ {3}  | id: {1} | class: {2} }}\" "
+                                    outfd.write("{3}_0x{0:08x} [label = \"{{ {3}  | id: {1} | class: {2} }}\" "
                                                 "shape = \"record\" color = \"blue\" style = \"filled\" fillcolor = \"{4}\"];\n".format(
                                     node.obj_offset,
                                     node.object_id,

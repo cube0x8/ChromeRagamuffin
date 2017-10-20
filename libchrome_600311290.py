@@ -61,7 +61,7 @@ chrome_vtypes = {
     }],
     'DOMNode': [40, {
         'm_nodeFlags': [16, ['unsigned int']],
-        'm_parentOrShadowHostNode': [24, ['pointer', ['ContainerNode']]],
+        'm_parentOrShadowHostNode': [24, ['pointer', ['Element']]],
         'm_treeScope': [32, ['pointer', ['TreeScope']]],
         'm_previous': [40, ['pointer', ['Element']]],
         'm_next': [48, ['pointer', ['Element']]],
