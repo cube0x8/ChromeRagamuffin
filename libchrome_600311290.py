@@ -22,7 +22,6 @@
 
 import volatility.obj as obj
 import struct
-import ipdb
 import time
 import unicodedata, re
 
@@ -180,6 +179,28 @@ chrome_vtypes = {
     'PageState': [8, {
         'data_': [0, ["long long"]],
         'size_': [16, ["unsigned int"]],
+    }],
+    'CacheLinkedListEntry': [24, {
+        '_Next': [0, ['pointer', ['CacheLinkedListEntry']]],
+        '_Prev': [8, ['pointer', ['CacheLinkedListEntry']]],
+        '_Myval': [16, ['CacheLinkedListValue']],
+    }],
+    'CacheLinkedListValue': [None, {
+        'first': [0, ['pointer', ['char']]],
+        'Stuff': [8, ['pointer', ['void']]],
+        'size_': [16, ['unsigned int']],
+        'second': [32, ['pointer', ['MemEntryImpl']]],
+    }],
+    'CharVector': [24, {
+        'MyFirst': [0, ['long long']],
+        'MyLast': [8, ['long long']],
+        'MyEnd': [16, ['long long']],
+    }],
+    'MemEntryImpl': [None, {
+        'key_': [24, ['pointer', ["char"]]],
+        'vector_size': [40, ['unsigned int']],
+        'HTTPdata_': [56, ["CharVector"]],
+        'BODYdata_': [80, ["CharVector"]],
     }],
 }
 

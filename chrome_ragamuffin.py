@@ -83,7 +83,6 @@ class NavigationControllerEntriesCheck():
                             return True # We have just found a NavigationController Object
         return False
 
-                        
 
 class DocumentScanner(scan.BaseScanner):
     checks = [("DocumentFlagScanner", {})]
@@ -578,7 +577,7 @@ class _frame_navigation_entry(obj.CType):
 
     @property
     def page_state(self):
-            return self.page_state_.v()
+        return self.page_state_.v()
 
     @property
     def frame_unique_name(self):
@@ -588,7 +587,7 @@ class _page_state(obj.CType):
     @property
     def size(self):
         return self.size_
-
+    
     @property
     def dump_page_state(self):
         size = int(self.size)
@@ -675,10 +674,8 @@ class chrome_ragamuffin(common.AbstractWindowsCommand):
                                     frame_entries = entry.get_frame_entries(entry.frame_tree_.dereference(), tree)
                                     if frame_entries:
                                         first_entry = frame_entries[0]
-                                        referer = first_entry.referer
-                                        redirect_chain = first_entry.redirect_chain
                                         frame_entries.pop(0)
-                                    yield entry.id, entry.obj_offset, entry.title, entry.user_typed_url, entry.original_request_url, entry.http_status_code, entry.method, entry.post_data, entry.transition, referer, redirect_chain, entry.timestamp, entry.restore_type, entry.page_type
+                                        yield entry.id, entry.obj_offset, entry.title, entry.user_typed_url, entry.original_request_url, entry.http_status_code, first_entry.method, first_entry.page_state, entry.transition, first_entry.referer, first_entry.redirect_chain, entry.timestamp, entry.restore_type, entry.page_type
                                     if frame_entries:
                                             for frame_entry in frame_entries:
                                                 yield entry.id, frame_entry.obj_offset, "frame_entry_object", frame_entry.url, frame_entry.url, None, frame_entry.method, frame_entry.page_state, None, frame_entry.referer, frame_entry.redirect_chain, entry.timestamp, None, frame_entry.frame_unique_name
@@ -733,13 +730,13 @@ class chrome_ragamuffin(common.AbstractWindowsCommand):
                                               ("Original request url", "50"),
                                               ("Status code", "3"),
                                               ("Method", "3"),
-                                              ("Post params", "20"),
+                                              ("PageState address", "20"),
                                               ("Transition", "10"),
                                               ("Referrer", "10"),
                                               ("Redirect chain", "8"),
                                               ("UTC Timestamp", "23"),
                                               ("Restore type", "30"),
-                                              ("Type page", "10")])
+                                              ("Page type", "10")])
 
                     for id, offset, title, user_typed_url, original_request_url, http_status_code, method, post_data, transition, referer, redirect_chain, timestamp, restore_type, page_type in data:
                         self.table_row(outfd, id, hex(offset), title, user_typed_url, original_request_url, http_status_code, method, post_data, transition, referer, redirect_chain, timestamp, restore_type, page_type)
@@ -773,6 +770,7 @@ class chrome_ragamuffin(common.AbstractWindowsCommand):
 
     def render_csv(self, outfd, data):
         if "analysis" in self._config.opts:
+            #ipdb.set_trace()
             outfd.write('ID$Offset$Title$User typed url$Original request url$Status code$Method$Post params$Transition$Referer$Redirect chain$UTC Timestamp$Restore Type$Type page\n')
             for id, offset, title, user_typed_url, original_request_url, http_status_code, method, post_data, transition, referer, redirect_chain, timestamp, restore_type, page_type in data:
                 row_output = "{0}${1}${2}${3}${4}${5}${6}${7}${8}${9}${10}${11}${12}${13}\n".format(
