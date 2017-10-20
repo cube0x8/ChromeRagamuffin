@@ -178,7 +178,8 @@ chrome_vtypes = {
         'policy_': [8, ['unsigned int']],
     }],
     'PageState': [8, {
-        'data_': [0, ["pointer", ["basic_string"]]],
+        'data_': [0, ["long long"]],
+        'size_': [16, ["unsigned int"]],
     }],
 }
 

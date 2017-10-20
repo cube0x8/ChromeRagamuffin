@@ -30,6 +30,7 @@ import volatility.utils as utils
 import volatility.scan as scan
 import volatility.utils as utils
 from volatility.renderers import TreeGrid
+import string
 
 class DocumentFlagScanner(scan.ScannerCheck):
     def __init__(self, address_space, **kwargs):
@@ -577,22 +578,26 @@ class _frame_navigation_entry(obj.CType):
 
     @property
     def page_state(self):
-        if self.method == "POST":
             return self.page_state_.v()
-        return None
-
-    def dump_page_state(self):
-        page_state_address = self.page_state
-        size = struct.unpack("<I", self.obj_vm.read(page_state_address+16, 0x4))[0]
-        if page_state_address is not None:
-            page_state = obj.Object("Pointer", vm=self.obj_vm, offset=page_state_address)
-            return self.obj_vm.read(page_state, size).replace("\x00", ".")
-        return None
 
     @property
     def frame_unique_name(self):
         return libchrome.get_basic_string(self, self.frame_unique_name_)
- 
+
+class _page_state(obj.CType):
+    @property
+    def size(self):
+        return self.size_
+
+    @property
+    def dump_page_state(self):
+        size = int(self.size)
+        data = self.data_
+        page_state_dump = self.obj_vm.read(data, size)
+        no_null_terminator = page_state_dump.replace("\x00", "")
+        string_readable = "".join([c for c in no_null_terminator if c in string.printable])
+        return string_readable
+
 class _tree_node(obj.CType):
     @property
     def parent(self):
@@ -609,7 +614,7 @@ class ChromeTypes(obj.ProfileModification):
         profile.vtypes.update(libchrome.chrome_vtypes)
         profile.object_classes.update(
             {"chrome_document": _document, "TextNode": _textNode, "Element": _element,
-             "DOMNode": _node, "HTMLElementForm": _html_element_form, "HTMLIframeElement": _html_iframe_element, "HTMLAnchorElement": _html_anchor_element, "Attribute": _attributes, "ElementData": _element_data, "HTMLImageElement": _html_image_element, "WebContents": _web_contents, "NavigationController": _navigation_controller, "NavigationEntry": _navigation_entry, "Vector": _vector, "FrameNavigationEntry": _frame_navigation_entry, "TreeNode": _tree_node, "GURL": _gurl})
+             "DOMNode": _node, "HTMLElementForm": _html_element_form, "HTMLIframeElement": _html_iframe_element, "HTMLAnchorElement": _html_anchor_element, "Attribute": _attributes, "ElementData": _element_data, "HTMLImageElement": _html_image_element, "WebContents": _web_contents, "NavigationController": _navigation_controller, "NavigationEntry": _navigation_entry, "Vector": _vector, "FrameNavigationEntry": _frame_navigation_entry, "TreeNode": _tree_node, "GURL": _gurl, "PageState": _page_state})
 
 
 class chrome_ragamuffin(common.AbstractWindowsCommand):
