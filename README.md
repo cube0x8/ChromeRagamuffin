@@ -51,7 +51,7 @@ You can get the output in two different modes using the *--output* flag. (exampl
 
 Extract the whole history navigation:
 ```sh
-$ ./volatility --plugins $PATH_TO_RAGAMUFFIN_DIR --profile Win10x64_14393 -f dump1.vmem chrome_ragamuffin --anaysis history
+$ ./volatility --plugins $PATH_TO_RAGAMUFFIN_DIR --profile Win10x64_14393 -f dump1.vmem chrome_ragamuffin --analysis history
 
 Volatility Foundation Volatility Framework 2.6
 | ID | Offset         | Title                                     | User typed url                            | Original request url                      | Status code | Method | Post params   | Transition                                           | Referer                                | Redirect chain                          | UTC Timestamp       | Restore type           | Type page        |
