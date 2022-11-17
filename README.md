@@ -1,4 +1,7 @@
 # Chrome Ragamuffin
+
+# THIS PROJECT IS NO LONGER MANTAINED
+
 Volatility plugin designed to extract useful information from Google Chrome's address space.
 
 The goal of this plugin is to make possible the analysis of a Google Chrome running instance. Starting from a memory dump, 
